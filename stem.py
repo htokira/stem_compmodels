@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from collections import deque
 
 # Параметри моделі
 TOTAL_HOURS = 24
@@ -13,21 +14,49 @@ T_FIX = 0.5
 N_BINOM = 30
 P_BINOM = 0.4
 
-# Визначення інтенсивності Пуассона (мат. сподівання покупців за крок 20 хв)
-def get_lambda(step_index):
+C = 5
+
+# інтенсивність Пуассона (мат. сподівання покупців за крок 20 хв)
+LAMBDAS = {
+    "night": 2,
+    "morning": 14,
+    "day": 9,
+    "evening": 36,
+    "late": 8,
+}
+
+# статичний розклад
+SCHEDULE = {
+    "night":     1,
+    "morning":   2,
+    "day":       1,
+    "evening":   4,
+    "late":      1,
+}
+
+# Визначення періоду часу
+def get_period(step_index):
     minute = step_index * STEP_MIN
     hour = (minute // 60) % 24
     
     if 0 <= hour < 7:
-        return 2
+        return "night"
     elif 7 <= hour < 10:
-        return 14
+        return "morning"
     elif 10 <= hour < 17:
-        return 9
+        return "day"
     elif 17 <= hour < 22:
-        return 36
+        return "evening"
     else:
-        return 8
+        return "late"
+
+# Інтенсивність потоку для кроку
+def get_lambda(step_index):
+    return LAMBDAS[get_period(step_index)]
+
+# Скільки кас працює наразі
+def get_open_cashiers(step_index):
+    return max(1, min(C, SCHEDULE[get_period(step_index)]))
 
 class Customer:
     def __init__(self, arrival_time, n_items):
@@ -38,7 +67,9 @@ class Customer:
         self.service_start_time = None
 
 # Моделювання
-queue = []
+queue = deque() # єдина черга
+channel_free_time = [0.0] * C # момент, коли кожна каса звільниться
+
 serviced_count = 0
 
 history_queue_length = []
@@ -50,6 +81,7 @@ current_time = 0.0
 
 for step in range(TOTAL_STEPS):
     current_time = step * STEP_MIN
+    step_end = current_time + STEP_MIN
     lam = get_lambda(step)
     
     num_new_customers = np.random.poisson(lam)
@@ -58,30 +90,30 @@ for step in range(TOTAL_STEPS):
         n_items = max(1, np.random.binomial(N_BINOM, P_BINOM))
         customer = Customer(arrival_time=current_time, n_items=n_items)
         queue.append(customer)
+
+    c_open = get_open_cashiers(step)
+
+    for i in range(c_open):
+        channel_free_time[i] = max(channel_free_time[i], current_time)
         
-    time_remaining_in_step = float(STEP_MIN)
     step_wait_times = []
     
-    while time_remaining_in_step > 0 and len(queue) > 0:
+    while len(queue) > 0:
+        earliest_cash = min(range(c_open), key=lambda i: channel_free_time[i])
         curr_cust = queue[0]
-        curr_sim_time = current_time + (STEP_MIN - time_remaining_in_step)
-        
-        if curr_cust.arrival_time > curr_sim_time:
-            time_remaining_in_step = STEP_MIN - (curr_cust.arrival_time - current_time)
-            curr_sim_time = curr_cust.arrival_time
+        start_time = max(channel_free_time[earliest_cash], curr_cust.arrival_time)
 
-        if curr_cust.service_start_time is None:
-            curr_cust.service_start_time = curr_sim_time
-            wait_time = max(0.0, curr_cust.service_start_time - curr_cust.arrival_time)
-            step_wait_times.append(wait_time)   
-            
-        if curr_cust.t_cl <= time_remaining_in_step:
-            time_remaining_in_step -= curr_cust.t_cl
-            queue.pop(0)
-            serviced_count += 1
-        else:
-            curr_cust.t_cl -= time_remaining_in_step
-            time_remaining_in_step = 0
+        if start_time >= step_end:
+            break
+
+        queue.popleft()
+        
+        curr_cust.service_start_time = start_time
+        wait_time = max(0.0, curr_cust.service_start_time - curr_cust.arrival_time)
+        step_wait_times.append(wait_time)
+
+        channel_free_time[earliest_cash] = start_time + curr_cust.t_cl
+        serviced_count += 1
             
     # Збір статистики за крок
     history_queue_length.append(len(queue))
@@ -109,7 +141,7 @@ plt.figure(figsize=(14, 6))
 
 plt.subplot(2, 1, 1)
 plt.plot(range(TOTAL_STEPS), history_queue_length, color='crimson', linewidth=2)
-plt.title("Динаміка довжини черги (L) при роботі 1 каси")
+plt.title("Динаміка довжини черги (L) при роботі кількох кас")
 plt.ylabel("Довжина черги (осіб)")
 plt.xlabel("Кроки моделювання (20 хв)")
 plt.grid(True, linestyle='--', alpha=0.6)
