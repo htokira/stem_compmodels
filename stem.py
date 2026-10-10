@@ -75,7 +75,13 @@ serviced_count = 0
 history_queue_length = []
 history_avg_wait_time = []
 history_serviced_count = []
+history_all_items = []
+history_rho = []
 time_labels = []
+
+avg_items = N_BINOM * P_BINOM
+avg_service_time = T_SCAN * avg_items + T_FIX
+step_capacity_per_cashier = STEP_MIN / avg_service_time
 
 current_time = 0.0
 
@@ -88,6 +94,7 @@ for step in range(TOTAL_STEPS):
     
     for _ in range(num_new_customers):
         n_items = max(1, np.random.binomial(N_BINOM, P_BINOM))
+        history_all_items.append(n_items)
         customer = Customer(arrival_time=current_time, n_items=n_items)
         queue.append(customer)
 
@@ -122,6 +129,10 @@ for step in range(TOTAL_STEPS):
     history_avg_wait_time.append(avg_wait)
 
     history_serviced_count.append(serviced_count)
+
+    total_capacity = c_open * step_capacity_per_cashier
+    rho = lam / total_capacity if total_capacity > 0 else 0.0
+    history_rho.append(rho)
     
     hour = (step * STEP_MIN) // 60
     minute = (step * STEP_MIN) % 60
@@ -131,22 +142,23 @@ df_results = pd.DataFrame({
     'Час': time_labels,
     'W (Час очікування, хв)': history_avg_wait_time,
     'L (Довжина черги, осіб)': history_queue_length,
-    'P (Обслужено покупців)': history_serviced_count
+    'P (Обслужено покупців)': history_serviced_count,
+    'ρ (Інтенсивність потоку)': history_rho
 })
 
 print("=== Таблиця вихідних параметрів моделі ===")
 print(df_results.head(TOTAL_STEPS).to_string(index=False))
 
 plt.figure(figsize=(14, 6))
-
-plt.subplot(2, 1, 1)
 plt.plot(range(TOTAL_STEPS), history_queue_length, color='crimson', linewidth=2)
 plt.title("Динаміка довжини черги (L) при роботі кількох кас")
 plt.ylabel("Довжина черги (осіб)")
 plt.xlabel("Кроки моделювання (20 хв)")
 plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
 
-plt.subplot(2, 1, 2)
+plt.figure(figsize=(14, 6))
 plt.plot(range(TOTAL_STEPS), history_avg_wait_time, color='navy', linewidth=2)
 plt.axhline(y=10, color='r', linestyle=':', label='Макс. допустимий час очікування (10 хв)')
 plt.title("Середній час очікування в черзі (W)")
@@ -155,7 +167,27 @@ plt.ylabel("Час (хв)")
 plt.xticks(range(0, TOTAL_STEPS, 3), time_labels[::3], rotation=45)
 plt.legend()
 plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
 
+plt.figure(figsize=(14, 5))
+plt.hist(history_all_items, bins=range(1, N_BINOM + 2), color='purple', edgecolor='black', alpha=0.7, align='left')
+plt.title("Розподіл кількості товарів у кошиках покупців")
+plt.xlabel("Кількість товарів у чеку (шт.)")
+plt.ylabel("Кількість покупців")
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(14, 5))
+plt.plot(range(TOTAL_STEPS), history_rho, color='darkorange', linewidth=2, label='Коефіцієнт завантаження системи (ρ)')
+plt.axhline(y=1.0, color='red', linestyle='--', linewidth=1.5, label='Критичний рівень перевантаження (ρ = 1.0)')
+plt.title("Динаміка коефіцієнта завантаження системи (ρ) протягом доби")
+plt.xlabel("Час доби")
+plt.ylabel("Коефіцієнт завантаження (ρ)")
+plt.xticks(range(0, TOTAL_STEPS, 3), time_labels[::3], rotation=45)
+plt.legend()
+plt.grid(True, linestyle='--', alpha=0.6)
 plt.tight_layout()
 plt.show()
 
