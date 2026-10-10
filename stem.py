@@ -15,6 +15,8 @@ N_BINOM = 30
 P_BINOM = 0.4
 
 C = 5
+MAX_WAIT = 10
+USE_DYNAMIC_SCHEDULE = True
 
 # інтенсивність Пуассона (мат. сподівання покупців за крок 20 хв)
 LAMBDAS = {
@@ -33,6 +35,18 @@ SCHEDULE = {
     "evening":   4,
     "late":      1,
 }
+
+# Скільки кас потрібно відкрити на початку кроку
+def calculate_needed_cashiers(queue, current_time):
+    if len(queue) == 0:
+        return 1
+    t_cl_sum = sum(cust.t_cl for cust in queue)
+    waited = np.mean([current_time - cust.arrival_time for cust in queue])
+    for c in range(1, C + 1):
+        # вже пройдений час очікування + половина часу на обслуговування черги, поділена на к-ть кас
+        if waited + t_cl_sum / (2 * c) <= MAX_WAIT: 
+            return c
+    return C
 
 # Визначення періоду часу
 def get_period(step_index):
@@ -76,6 +90,7 @@ history_queue_length = []
 history_avg_wait_time = []
 history_serviced_count = []
 history_all_items = []
+history_c_open = []
 history_rho = []
 time_labels = []
 
@@ -98,7 +113,10 @@ for step in range(TOTAL_STEPS):
         customer = Customer(arrival_time=current_time, n_items=n_items)
         queue.append(customer)
 
-    c_open = get_open_cashiers(step)
+    if USE_DYNAMIC_SCHEDULE:
+        c_open = calculate_needed_cashiers(queue, current_time)
+    else:
+        c_open = get_open_cashiers(step)
 
     for i in range(c_open):
         channel_free_time[i] = max(channel_free_time[i], current_time)
@@ -133,6 +151,7 @@ for step in range(TOTAL_STEPS):
     total_capacity = c_open * step_capacity_per_cashier
     rho = lam / total_capacity if total_capacity > 0 else 0.0
     history_rho.append(rho)
+    history_c_open.append(c_open)
     
     hour = (step * STEP_MIN) // 60
     minute = (step * STEP_MIN) % 60
@@ -143,7 +162,8 @@ df_results = pd.DataFrame({
     'W (Час очікування, хв)': history_avg_wait_time,
     'L (Довжина черги, осіб)': history_queue_length,
     'P (Обслужено покупців)': history_serviced_count,
-    'ρ (Інтенсивність потоку)': history_rho
+    'ρ (Інтенсивність потоку)': history_rho,
+    'Кас відкрито': history_c_open
 })
 
 print("=== Таблиця вихідних параметрів моделі ===")
